@@ -16,6 +16,7 @@ YouTube 영상(Shorts 포함)의 자막을 자동으로 추출하고 저장하�
 - ✅ **Shorts 완벽 지원** - YouTube Shorts 자막 100% 추출
 - ✅ **자동 저장** - 영상 제목으로 `output/` 디렉토리에 자동 저장
 - ✅ **메타데이터 자동 추가** - 영상 타입, ID, 길이, 채널명, 업로드 날짜
+- ✅ **고정 댓글 및 설명** - 영상의 고정 댓글과 설명 자동 추가
 - ✅ **100개 이상 언어** - 한국어, 영어, 일본어, 중국어 등
 - ✅ **VTT 처리** - 타임스탬프 정리, 태그 제거, 중복 제거, 블록 병합
 - ✅ **CLI 인터페이스** - 다양한 옵션 제공
@@ -34,7 +35,7 @@ pip install -r requirements.txt
 ./run_ytdlp.sh "https://www.youtube.com/watch?v=VIDEO_ID"
 
 # 생성된 파일 확인
-ls script/
+ls output/
 ```
 
 **완료!** `output/` 디렉토리에 영상 제목으로 자막 파일이 생성됩니다.
@@ -43,7 +44,7 @@ ls script/
 
 ## 💻 사용법
 
-### 기본 사용
+### 기본 사용 (단일 영상)
 
 ```bash
 # 일반 영상
@@ -57,6 +58,27 @@ ls script/
 ```
 
 **결과:** `output/영상제목.txt` 파일 자동 생성 (메타데이터 포함)
+
+### 복수 영상 처리 ⭐
+
+```bash
+# 여러 URL을 한 번에
+./run_ytdlp.sh "URL1" "URL2" "URL3"
+
+# 파일에서 URL 목록 읽기 (추천)
+./run_ytdlp.sh --batch urls.txt
+```
+
+**urls.txt 예시:**
+
+```
+https://www.youtube.com/watch?v=VIDEO_ID1
+https://www.youtube.com/watch?v=VIDEO_ID2
+https://www.youtube.com/shorts/VIDEO_ID3
+# 주석도 가능
+```
+
+**결과:** `output/` 디렉토리에 여러 `.txt` 파일 자동 생성
 
 ### 자주 사용하는 옵션
 
@@ -120,7 +142,7 @@ youtube-subtitle/
 ├── cli/                   # 실행 스크립트
 │   ├── main_ytdlp.py         # CLI 인터페이스
 │   └── example.py            # 사용 예시
-├── script/                    # 자막 파일 저장 위치 (자동 생성)
+├── output/                    # 자막 파일 저장 위치 (자동 생성)
 ├── docs/                      # 문서
 │   ├── README.md             # 완벽 가이드
 │   └── SEQUENCE_DIAGRAM.md   # 시퀀스 다이어그램
@@ -135,10 +157,14 @@ youtube-subtitle/
 from src.ytdlp_fetcher import YtDlpFetcher
 from src.subtitle_processor import SubtitleProcessor
 
-# 1. 영상 정보 조회
+# 1. 영상 정보, 고정 댓글, 설명 조회
 video_info = YtDlpFetcher.get_video_info("VIDEO_URL")
 print(f"제목: {video_info['title']}")
-print(f"타입: {video_info['video_type']}")
+print(f"설명: {video_info['description'][:50]}...")
+
+pinned_comment = YtDlpFetcher.get_pinned_comment("VIDEO_URL")
+if pinned_comment:
+    print(f"고정 댓글: {pinned_comment['text']}")
 
 # 2. 자막 다운로드
 vtt_text = YtDlpFetcher.fetch_subtitle("VIDEO_URL", lang='ko')
