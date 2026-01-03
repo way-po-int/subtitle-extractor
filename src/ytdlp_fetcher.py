@@ -205,11 +205,58 @@ class YtDlpFetcher:
                     'duration_string': duration_string,
                     'video_type': video_type,
                     'uploader': info.get('uploader', 'Unknown'),
-                    'upload_date': info.get('upload_date', 'Unknown')
+                    'upload_date': info.get('upload_date', 'Unknown'),
+                    'description': info.get('description', 'No description')
                 }
                 
         except Exception as e:
             raise Exception(f"영상 정보 조회 실패: {str(e)}")
+    
+    @staticmethod
+    def get_pinned_comment(video_url: str) -> Optional[Dict[str, str]]:
+        """
+        YouTube 영상의 고정 댓글 조회
+
+        Args:
+            video_url: YouTube 영상 URL 또는 video ID
+
+        Returns:
+            {
+                'author': '댓글 작성자',
+                'text': '고정 댓글 내용'
+            }
+            고정 댓글이 없으면 None을 반환합니다.
+        """
+        video_id = YtDlpFetcher.extract_video_id(video_url)
+        if not video_id:
+            raise ValueError("유효하지 않은 YouTube URL 또는 video ID입니다.")
+        
+        if len(video_url) == 11:
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+        ydl_opts = {
+            'skip_download': True,
+            'getcomments': True,
+            'quiet': True,
+            'no_warnings': True,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                
+                if 'comments' in info and info['comments']:
+                    for comment in info['comments']:
+                        if comment.get('is_pinned'):
+                            return {
+                                'author': comment.get('author', 'Unknown'),
+                                'text': comment.get('text', 'No content')
+                            }
+                
+                return None
+
+        except Exception as e:
+            raise Exception(f"고정 댓글 조회 실패: {str(e)}")
     
     @staticmethod
     def fetch_multiple_languages(video_url: str, languages: List[str] = None) -> Dict[str, str]:
