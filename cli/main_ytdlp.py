@@ -15,6 +15,7 @@ youtube-transcript-api보다 더 강력하고 안정적입니다.
 import argparse
 import sys
 import re
+import time
 from pathlib import Path
 from src.ytdlp_fetcher import YtDlpFetcher
 from src.subtitle_processor import SubtitleProcessor
@@ -34,7 +35,7 @@ def sanitize_filename(filename: str) -> str:
     return filename
 
 
-def create_metadata_header(video_info: dict, pinned_comment: dict = None, description: str = None) -> str:
+def create_metadata_header(video_info: dict, pinned_comment: dict = None, description: str = None, processing_time_ms: float = 0) -> str:
     """자막 파일 상단에 추가할 메타데이터 생성"""
     header = []
     header.append("="*80)
@@ -46,6 +47,7 @@ def create_metadata_header(video_info: dict, pinned_comment: dict = None, descri
     header.append(f"영상 길이: {video_info['duration_string']} ({video_info['duration']}초)")
     header.append(f"채널명: {video_info['uploader']}")
     header.append(f"업로드 날짜: {video_info['upload_date']}")
+    header.append(f"처리 시간: {processing_time_ms:.2f} ms")
 
     if pinned_comment:
         header.append("-"*80)
@@ -217,6 +219,7 @@ def main():
     print(f"{'='*80}\n")
     
     for idx, url in enumerate(urls, 1):
+        start_time = time.time()
         print(f"\n[{idx}/{total}] 처리 중: {url}")
         print("-" * 80)
         
@@ -230,34 +233,29 @@ def main():
         print(f"🎬 Video ID: {video_id}")
         
         try:
-            # 1. 영상 정보 가져오기
-            print("📋 영상 정보 조회 중...")
-            video_info = YtDlpFetcher.get_video_info(url)
+            # 1. 한 번의 요청으로 모든 데이터 가져오기
+            print("📋 영상 정보, 댓글, 자막 동시 조회 중...")
+            auto_gen = not args.no_auto
+            all_data = YtDlpFetcher.fetch_all_in_one(url, args.lang, auto_generated=auto_gen)
+            
+            video_info = all_data['video_info']
+            pinned_comment = all_data['pinned_comment']
+            vtt_text = all_data['vtt_text']
+
             print(f"✅ 제목: {video_info['title']}")
             print(f"   타입: {video_info['video_type'].upper()} | 길이: {video_info['duration_string']}")
 
-            # 고정 댓글 가져오기
-            print("\n📌 고정 댓글 조회 중...")
-            try:
-                pinned_comment = YtDlpFetcher.get_pinned_comment(url)
-                if pinned_comment:
-                    print("✅ 고정 댓글을 찾았습니다.")
-                else:
-                    print("💬 고정 댓글이 없습니다.")
-            except Exception as e:
-                print(f"⚠️  고정 댓글 조회 실패: {e}")
-            
-            # 2. 자막 다운로드
-            auto_gen = not args.no_auto
-            print(f"\n📥 자막 다운로드 중... (언어: {args.lang}, 자동생성: {'허용' if auto_gen else '제외'})")
-            vtt_text = YtDlpFetcher.fetch_subtitle(url, args.lang, auto_generated=auto_gen)
-            
+            if pinned_comment:
+                print("✅ 고정 댓글을 찾았습니다.")
+            else:
+                print("💬 고정 댓글이 없습니다.")
+
             if not vtt_text:
                 print("❌ 자막을 가져올 수 없습니다.")
                 fail_count += 1
                 continue
             
-            print("✅ 자막 다운로드 완료")
+            print("✅ 모든 데이터 조회 완료")
             
             # 원본 VTT 출력
             if args.raw:
@@ -276,9 +274,13 @@ def main():
                     fail_count += 1
                     continue
                 
+                # 처리 시간 계산
+                end_time = time.time()
+                processing_time_ms = (end_time - start_time) * 1000
+
                 # 메타데이터 헤더 추가
                 description_text = video_info.get('description')
-                metadata_header = create_metadata_header(video_info, pinned_comment, description_text)
+                metadata_header = create_metadata_header(video_info, pinned_comment, description_text, processing_time_ms)
                 result = metadata_header + "\n" + processed_text
                 
                 print("✅ 자막 처리 완료")
