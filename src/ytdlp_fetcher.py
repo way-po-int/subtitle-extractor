@@ -5,6 +5,8 @@ youtube-transcript-api보다 더 강력하고 안정적입니다.
 
 import re
 import json
+import os
+import tempfile
 from typing import Optional, List, Dict
 import yt_dlp
 
@@ -12,8 +14,7 @@ import yt_dlp
 class YtDlpFetcher:
     """yt-dlp를 사용하여 YouTube 자막을 가져오는 클래스"""
     
-    @staticmethod
-    def extract_video_id(url: str) -> Optional[str]:
+    def extract_video_id(self, url: str) -> Optional[str]:
         """
         YouTube URL에서 video ID 추출
         
@@ -36,8 +37,7 @@ class YtDlpFetcher:
         
         return None
     
-    @staticmethod
-    def fetch_all_in_one(video_url: str, lang: str = 'ko', auto_generated: bool = True) -> Dict:
+    def fetch_all_in_one(self, video_url: str, lang: str = 'ko', auto_generated: bool = True, cookies: Optional[str] = None) -> Dict:
         """
         단 한 번의 요청으로 영상 정보, 고정 댓글, 자막을 모두 가져옵니다.
         AWS 람다와 같이 실행 시간을 최소화해야 하는 환경에 최적화되었습니다.
@@ -54,29 +54,47 @@ class YtDlpFetcher:
                 'vtt_text': '...' or None
             }
         """
-        video_id = YtDlpFetcher.extract_video_id(video_url)
+        video_id = self.extract_video_id(video_url)
         if not video_id:
             raise ValueError("유효하지 않은 YouTube URL 또는 video ID입니다.")
 
         if len(video_url) == 11:
             video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-        ydl_opts = {
-            'skip_download': True,
-            'writesubtitles': True,
-            'writeautomaticsub': auto_generated,
-            'subtitleslangs': [lang],
-            'subtitlesformat': 'vtt',
-            'getcomments': True,
-            'quiet': True,
-            'no_warnings': True,
-        }
-
+        cookie_file = None
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
+            if cookies:
+                # 쿠키를 임시 파일에 저장
+                cookie_file = '/tmp/cookies.txt'
+                with open(cookie_file, 'w', encoding='utf-8') as f:
+                    # Netscape 쿠키 파일 헤더 추가
+                    f.write("# Netscape HTTP Cookie File\n")
+                    f.write("# http://www.netscape.com/newsref/std/cookie_spec.html\n")
+                    f.write("# This is a generated file! Do not edit.\n\n")
+                    f.write(cookies)
 
-                # 1. 영상 정보 파싱
+            with tempfile.TemporaryDirectory() as temp_dir:
+                ydl_opts = {
+                'outtmpl': os.path.join(temp_dir, '%(id)s.%(ext)s'),
+                'skip_download': True,
+                'writesubtitles': True,
+                'writeautomaticsub': auto_generated,
+                'subtitleslangs': [lang],
+                'subtitlesformat': 'vtt',
+                'getcomments': True,
+                'quiet': True,
+                'no_warnings': True,
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
+            }
+
+            if cookie_file:
+                ydl_opts['cookiefile'] = cookie_file
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(video_url, download=True) # download=True로 변경하여 자막 다운로드 실행
+
+                    # 1. 영상 정보 파싱
                 video_type = 'shorts' if 'shorts' in video_url.lower() or info.get('duration', 0) <= 60 else 'watch'
                 duration = info.get('duration', 0)
                 minutes, seconds = divmod(int(duration), 60)
@@ -106,14 +124,17 @@ class YtDlpFetcher:
 
                 # 3. 자막 내용 파싱
                 vtt_text = None
-                requested_subtitles = info.get('requested_subtitles')
-                if requested_subtitles and lang in requested_subtitles:
-                    vtt_url = requested_subtitles[lang].get('url')
-                    if vtt_url:
-                        import requests
-                        response = requests.get(vtt_url, timeout=10)
-                        response.raise_for_status()
-                        vtt_text = response.text
+                subtitle_path = os.path.join(temp_dir, f"{video_id}.{lang}.vtt")
+                if os.path.exists(subtitle_path):
+                    with open(subtitle_path, 'r', encoding='utf-8') as f:
+                        vtt_text = f.read()
+                else:
+                    # 대체 경로 확인 (자동자막의 경우 lang 코드가 다를 수 있음)
+                    for filename in os.listdir(temp_dir):
+                        if filename.endswith('.vtt'):
+                            with open(os.path.join(temp_dir, filename), 'r', encoding='utf-8') as f:
+                                vtt_text = f.read()
+                            break
 
                 if not vtt_text:
                     print(f"⚠️ '{lang}' 언어의 자막을 찾을 수 없습니다.")
@@ -124,7 +145,11 @@ class YtDlpFetcher:
                     'vtt_text': vtt_text
                 }
 
-        except yt_dlp.utils.DownloadError as e:
-            raise Exception(f"영상을 찾을 수 없거나 접근할 수 없습니다: {str(e)}")
-        except Exception as e:
-            raise Exception(f"데이터 조회 실패: {str(e)}")
+            except yt_dlp.utils.DownloadError as e:
+                raise Exception(f"영상을 찾을 수 없거나 접근할 수 없습니다: {str(e)}")
+            except Exception as e:
+                raise Exception(f"데이터 조회 실패: {str(e)}")
+        finally:
+            # 쿠키 파일이 생성되었다면 삭제
+            if cookie_file and os.path.exists(cookie_file):
+                os.remove(cookie_file)
