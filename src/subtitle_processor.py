@@ -12,6 +12,8 @@ class SubtitleProcessor:
     
     TIME_REGEX = re.compile(r'^(\d{2}:\d{2}:\d{2}\.\d{3}) -->')
     VTT_TAG_REGEX = re.compile(r'<[^>]*>')
+    URL_REGEX = re.compile(r'https?://\S+')
+    MUSIC_TAG_REGEX = re.compile(r'\(.*?\)') # [음악], [웃음] 등 제거
     EMOJI_REGEX = re.compile(
         r'[\U0001F300-\U0001F9FF\U00002600-\U000026FF\U00002700-\U000027BF'
         r'\U0001F000-\U0001F02F\U0001F0A0-\U0001F0FF\U0001F100-\U0001F64F'
@@ -38,9 +40,13 @@ class SubtitleProcessor:
         return SubtitleProcessor.VTT_TAG_REGEX.sub('', text).strip()
     
     @staticmethod
-    def remove_emojis(text: str) -> str:
-        """이모지 제거"""
-        return SubtitleProcessor.EMOJI_REGEX.sub('', text)
+    def clean_text(text: str) -> str:
+        """불필요한 요소(VTT 태그, URL, 음악 태그, 이모지)를 제거합니다."""
+        text = SubtitleProcessor.VTT_TAG_REGEX.sub('', text)
+        text = SubtitleProcessor.URL_REGEX.sub('', text)
+        text = SubtitleProcessor.MUSIC_TAG_REGEX.sub('', text)
+        text = SubtitleProcessor.EMOJI_REGEX.sub('', text)
+        return text.strip()
     
     def parse_vtt(self, vtt_text: str) -> List[Dict[str, str]]:
         """
@@ -82,8 +88,7 @@ class SubtitleProcessor:
                 current_text = ''
             else:
                 # 텍스트 라인 처리
-                clean_text = self.remove_vtt_tags(line)
-                clean_text = self.remove_emojis(clean_text)
+                clean_text = self.clean_text(line)
                 current_text = clean_text
         
         # 마지막 블록 추가
@@ -151,32 +156,30 @@ class SubtitleProcessor:
     
     def process(self, vtt_text: str, merge_count: int = 3) -> Optional[str]:
         """
-        VTT 자막을 처리하여 정리된 transcript 반환
-        
+        VTT 자막을 처리하여 최종 스크립트 문자열로 반환합니다.
+        타임스탬프, 중복, 불필요한 태그를 모두 제거합니다.
+
         Args:
-            vtt_text: VTT 형식의 자막 텍스트
-            merge_count: 병합할 블록 개수 (기본값: 3)
-            
+            vtt_text: VTT 형식의 자막 텍스트.
+            merge_count: 텍스트를 부드럽게 연결하기 위해 병합할 블록 수.
+
         Returns:
-            정리된 transcript 문자열 또는 None
+            정리된 단일 transcript 문자열 또는 None.
         """
-        # 1. VTT 파싱
+        # 1. VTT 파싱 (타임스탬프 포함)
         time_blocks = self.parse_vtt(vtt_text)
         if not time_blocks:
             return None
-        
+
         # 2. 롤링 오버랩 제거
-        final_blocks = self.remove_rolling_overlap(time_blocks)
-        if not final_blocks:
+        non_overlapping_blocks = self.remove_rolling_overlap(time_blocks)
+        if not non_overlapping_blocks:
             return None
-        
-        # 3. 블록 병합
-        merged_blocks = self.merge_blocks(final_blocks, merge_count)
-        
-        # 4. 최종 포맷팅
-        transcript = '\n\n'.join(
-            f"{block['time']}\n{block['text']}"
-            for block in merged_blocks
-        )
-        
-        return transcript if transcript.strip() else None
+
+        # 3. 모든 텍스트를 하나의 문자열로 병합
+        full_transcript = ' '.join(block['text'] for block in non_overlapping_blocks)
+
+        # 4. 최종적으로 불필요한 공백 정리
+        final_transcript = ' '.join(full_transcript.split())
+
+        return final_transcript if final_transcript else None

@@ -57,21 +57,28 @@ def lambda_handler(event, context):
         vtt_text = data.get('vtt_text')
         video_id = video_info.get('video_id', 'unknown_video')
 
-        # 4. 자막 처리
+        # 4. 자막 및 텍스트 처리
         processor = SubtitleProcessor()
-        processed_transcript = processor.process(vtt_text) if vtt_text else None
+        transcript = processor.process(vtt_text) if vtt_text else None
 
-        # 5. S3에 저장할 결과 데이터 구성
+        # 5. 설명 및 고정 댓글 텍스트 정리
+        if video_info.get('description'):
+            video_info['description'] = processor.clean_text(video_info['description'])
+        
+        pinned_comment = data.get('pinned_comment')
+        if pinned_comment and pinned_comment.get('text'):
+            pinned_comment['text'] = processor.clean_text(pinned_comment['text'])
+
+        # 6. S3에 저장할 최종 결과 데이터 구성
         result = {
             'video_info': video_info,
-            'pinned_comment': data.get('pinned_comment'),
-            'processed_transcript': processed_transcript,
-            'raw_vtt': vtt_text
+            'pinned_comment': pinned_comment,
+            'transcript': transcript
         }
         
-        # 6. S3에 JSON 파일로 업로드
-        s3_key = f"{video_id}/source.json"
-        # # 7. RDS 상태를 'SCRAPED'로 업데이트
+        # 7. S3에 JSON 파일로 업로드
+        s3_key = f"{video_id}/scrap_result.json"
+        # # 8. RDS 상태를 'SCRAPED'로 업데이트
         # update_status(db_conn, social_media_id, 'SCRAPED')
 
         s3.put_object(
